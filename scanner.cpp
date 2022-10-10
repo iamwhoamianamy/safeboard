@@ -59,6 +59,29 @@ SusType checkForSuspicion(const std::filesystem::path& path)
     return SusType::None;
 }
 
+struct ScanResults
+{
+    size_t jsFiles = 0;
+    size_t unixFiles = 0;
+    size_t macOSFiles = 0; 
+    size_t errors = 0;
+    size_t proccessed = 0;
+
+    void add(SusType type)
+    {
+        switch (type)
+        {
+            case SusType::Js: jsFiles++; break;
+            case SusType::Unix: unixFiles++; break;
+            case SusType::MacOS: macOSFiles++; break;
+            case SusType::Error: errors++; break;
+            default: break;
+        }
+
+        proccessed++;
+    }
+};
+
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -71,39 +94,24 @@ int main(int argc, char** argv)
     try
     {
         std::filesystem::path path(argv[1]);
-        
-        size_t jsFiles = 0;
-        size_t unixFiles = 0;
-        size_t macOSFiles = 0; 
-        size_t errors = 0;
-        size_t proccessed = 0;
+        ScanResults scanResult;        
 
         auto start = std::chrono::steady_clock::now();
 
         for (const auto& file : std::filesystem::directory_iterator(path))
         {
             SusType sus = checkForSuspicion(file.path());
-
-            switch (sus)
-            {
-                case SusType::Js: jsFiles++; break;
-                case SusType::Unix: unixFiles++; break;
-                case SusType::MacOS: macOSFiles++; break;
-                case SusType::Error: errors++; break;
-                default: break;
-            }
-
-            proccessed++;
+            scanResult.add(sus);
         }
-
+        
         auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
 
         std::cout << "====== Scan result ======" << std::endl;
-        std::cout << "Processed files: " << proccessed << std::endl;
-        std::cout << "JS detects: " << jsFiles << std::endl;
-        std::cout << "Unix detects: " << unixFiles << std::endl;
-        std::cout << "macOS detects: " << macOSFiles << std::endl;
-        std::cout << "Errors: " << errors << std::endl;
+        std::cout << "Processed files: " << scanResult.proccessed << std::endl;
+        std::cout << "JS detects: " << scanResult.jsFiles << std::endl;
+        std::cout << "Unix detects: " << scanResult.unixFiles << std::endl;
+        std::cout << "macOS detects: " << scanResult.macOSFiles << std::endl;
+        std::cout << "Errors: " << scanResult.errors << std::endl;
         std::cout << "Exection time: " << time << std::endl;
         std::cout << "=========================" << std::endl;
     }

@@ -1,5 +1,7 @@
 {
     "files.associations": {
+        "*.php": "php",
+        "*.ec": "c",
         "array": "cpp",
         "atomic": "cpp",
         "bit": "cpp",
@@ -50,6 +52,11 @@
         "sstream": "cpp",
         "stdexcept": "cpp",
         "streambuf": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "mutex": "cpp",
+        "condition_variable": "cpp",
+        "semaphore": "cpp",
+        "stop_token": "cpp",
+        "thread": "cpp"
     }
 }
