@@ -18,10 +18,10 @@ enum class SusType
 SusType checkForSuspicion(const std::filesystem::path& path)
 {
     std::ifstream fin;
+    fin.exceptions(std::ifstream::failbit | std::ifstream::badbit);
 
     try
     {
-        fin.exceptions ( std::ifstream::failbit | std::ifstream::badbit );
         fin.open(path, std::ios::in);
 
         std::string line;
@@ -94,24 +94,24 @@ int main(int argc, char** argv)
     try
     {
         std::filesystem::path path(argv[1]);
-        ScanResults scanResult;        
+        ScanResults scanResults;        
 
         auto start = std::chrono::steady_clock::now();
 
         for (const auto& file : std::filesystem::directory_iterator(path))
         {
             SusType sus = checkForSuspicion(file.path());
-            scanResult.add(sus);
+            scanResults.add(sus);
         }
         
         auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
 
         std::cout << "====== Scan result ======" << std::endl;
-        std::cout << "Processed files: " << scanResult.proccessed << std::endl;
-        std::cout << "JS detects: " << scanResult.jsFiles << std::endl;
-        std::cout << "Unix detects: " << scanResult.unixFiles << std::endl;
-        std::cout << "macOS detects: " << scanResult.macOSFiles << std::endl;
-        std::cout << "Errors: " << scanResult.errors << std::endl;
+        std::cout << "Processed files: " << scanResults.proccessed << std::endl;
+        std::cout << "JS detects: " << scanResults.jsFiles << std::endl;
+        std::cout << "Unix detects: " << scanResults.unixFiles << std::endl;
+        std::cout << "macOS detects: " << scanResults.macOSFiles << std::endl;
+        std::cout << "Errors: " << scanResults.errors << std::endl;
         std::cout << "Exection time: " << time << std::endl;
         std::cout << "=========================" << std::endl;
     }
