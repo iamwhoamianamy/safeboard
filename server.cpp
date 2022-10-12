@@ -12,6 +12,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <fstream>
+#include <filesystem>
 
 namespace beast = boost::beast;   // from <boost/beast.hpp>
 namespace http = beast::http;     // from <boost/beast/http.hpp>
@@ -26,6 +28,10 @@ enum class SusType
     MacOS,
     Error
 };
+
+const std::string jsSus = "<script>evil_script()</script>";
+const std::string unixSus = "rm -rf ~/Documents";
+const std::string macOSSus = "system(\"launchctl load /Library/LaunchAgents/com.malware.agent\")";
 
 SusType checkForSuspicion(const std::filesystem::path& path)
 {
@@ -134,22 +140,20 @@ void handle_request(
         return send(bad_request("Illegal request-target"));
     }
 
-    std::string path(req.target());
-    ScanResults scanResults;        
+    // std::string path(req.target());
+    // ScanResults scanResults;        
 
-    auto start = std::chrono::steady_clock::now();
+    // auto start = std::chrono::steady_clock::now();
 
-    for (const auto& file : std::filesystem::directory_iterator(path))
-    {
-        SusType sus = checkForSuspicion(file.path());
-        scanResults.add(sus);
-    }
+    // for (const auto& file : std::filesystem::directory_iterator(path))
+    // {
+    //     SusType sus = checkForSuspicion(file.path());
+    //     scanResults.add(sus);
+    // }
     
-    auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
+    // auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
 
     // Handle the case where the file doesn't exist
-    if (ec == beast::errc::no_such_file_or_directory)
-        return send(not_found(req.target()));
 
     // Handle an unknown error
     if (ec)
@@ -307,14 +311,12 @@ class listener : public std::enable_shared_from_this<listener>
 {
     net::io_context &ioc_;
     tcp::acceptor acceptor_;
-    std::shared_ptr<std::string const> doc_root_;
 
 public:
     listener(
         net::io_context &ioc,
-        tcp::endpoint endpoint,
-        std::shared_ptr<std::string const> const &doc_root) :
-            ioc_(ioc), acceptor_(net::make_strand(ioc)), doc_root_(doc_root)
+        tcp::endpoint endpoint) :
+            ioc_(ioc), acceptor_(net::make_strand(ioc))
     {
         beast::error_code ec;
 
@@ -378,7 +380,7 @@ private:
         else
         {
             // Create the session and run it
-            std::make_shared<session>(std::move(socket), doc_root_)->run();
+            std::make_shared<session>(std::move(socket))->run();
         }
 
         // Accept another connection
@@ -393,7 +395,7 @@ int main(int argc, char *argv[])
     const auto threads = 100;
 
     net::io_context ioc{threads};
-    std::make_shared<listener>(ioc, tcp::endpoint{address, port}, doc_root)->run();
+    std::make_shared<listener>(ioc, tcp::endpoint{address, port})->run();
 
     // Run the I/O service on the requested number of threads
     std::vector<std::thread> v;
