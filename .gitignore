@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+/file_generator
+/file_contaminator
+/scanner
+/client
+/server
