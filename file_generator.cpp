@@ -2,6 +2,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 
 std::string generateRandomString(size_t length)
 {
@@ -35,7 +36,8 @@ int main(int argc, char** argv)
 {
     if(argc != 3)
     {
-        std::cout << "Not enough params!" << std::endl;
+        std::cout << "Not enough params! Example:" << std::endl;
+        std::cout << argv[0] << " FILE_COUNT /directory" << std::endl;
         return 1;
     }
     
@@ -43,6 +45,7 @@ int main(int argc, char** argv)
     {
         size_t fileCount = atoll(argv[1]);
         std::string path(argv[2]);
+        std::filesystem::create_directory(path);
 
         for (size_t i = 0; i < fileCount; i++)
         {
