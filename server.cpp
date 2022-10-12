@@ -33,6 +33,29 @@ const std::string jsSus = "<script>evil_script()</script>";
 const std::string unixSus = "rm -rf ~/Documents";
 const std::string macOSSus = "system(\"launchctl load /Library/LaunchAgents/com.malware.agent\")";
 
+struct ScanResults
+{
+    size_t jsFiles = 0;
+    size_t unixFiles = 0;
+    size_t macOSFiles = 0; 
+    size_t errors = 0;
+    size_t proccessed = 0;
+
+    void add(SusType type)
+    {
+        switch (type)
+        {
+            case SusType::Js: jsFiles++; break;
+            case SusType::Unix: unixFiles++; break;
+            case SusType::MacOS: macOSFiles++; break;
+            case SusType::Error: errors++; break;
+            default: break;
+        }
+
+        proccessed++;
+    }
+};
+
 SusType checkForSuspicion(const std::filesystem::path& path)
 {
     std::ifstream fin;
@@ -83,7 +106,6 @@ SusType checkForSuspicion(const std::filesystem::path& path)
 // caller to pass a generic lambda for receiving the response.
 template <class Body, class Allocator, class Send>
 void handle_request(
-    beast::string_view doc_root,
     http::request<Body, http::basic_fields<Allocator>> &&req,
     Send &&send)
 {
@@ -140,37 +162,28 @@ void handle_request(
         return send(bad_request("Illegal request-target"));
     }
 
-    // std::string path(req.target());
-    // ScanResults scanResults;        
+    std::string path(req.target());
+    ScanResults scanResults;        
 
-    // auto start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
-    // for (const auto& file : std::filesystem::directory_iterator(path))
-    // {
-    //     SusType sus = checkForSuspicion(file.path());
-    //     scanResults.add(sus);
-    // }
+    for (const auto& file : std::filesystem::directory_iterator(path))
+    {
+        SusType sus = checkForSuspicion(file.path());
+        scanResults.add(sus);
+    }
     
-    // auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
-
-    // Handle the case where the file doesn't exist
-
-    // Handle an unknown error
-    if (ec)
-        return send(server_error(ec.message()));
-
-    // Cache the size since we need it after the move
-    auto const size = body.size();
+    auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
 
     // Respond to GET request
-    http::response<http::file_body> res{
-        std::piecewise_construct,
-        std::make_tuple(std::move(body)),
-        std::make_tuple(http::status::ok, req.version())};
-
+    http::response<http::empty_body> res;
     res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-    res.set(http::field::content_type, mime_type(path));
-    res.content_length(size);
+    res.set(boost::beast::string_view("Processed"), std::to_string(scanResults.proccessed));
+    res.set(boost::beast::string_view("Js"), std::to_string(scanResults.jsFiles));
+    res.set(boost::beast::string_view("Unix"), std::to_string(scanResults.unixFiles));
+    res.set(boost::beast::string_view("MacOS"), std::to_string(scanResults.macOSFiles));
+    res.set(boost::beast::string_view("Errors"), std::to_string(scanResults.errors));
+    res.set(boost::beast::string_view("Time"), std::to_string(time));
     res.keep_alive(req.keep_alive());
     return send(std::move(res));
 }
@@ -215,17 +228,13 @@ class session : public std::enable_shared_from_this<session>
 
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
-    std::shared_ptr<std::string const> doc_root_;
     http::request<http::string_body> req_;
     std::shared_ptr<void> res_;
     send_lambda lambda_;
 
 public:
     // Take ownership of the stream
-    session(
-        tcp::socket &&socket,
-        std::shared_ptr<std::string const> const &doc_root)
-        : stream_(std::move(socket)), doc_root_(doc_root), lambda_(*this)
+    session(tcp::socket &&socket): stream_(std::move(socket)), lambda_(*this)
     {
     }
 
@@ -270,7 +279,7 @@ public:
             return fail(ec, "read");
 
         // Send the response
-        handle_request(*doc_root_, std::move(req_), lambda_);
+        handle_request(std::move(req_), lambda_);
     }
 
     void on_write( bool close, beast::error_code ec, size_t bytes_transferred)
@@ -390,12 +399,12 @@ private:
 
 int main(int argc, char *argv[])
 {
-    const auto address = net::ip::make_address(argv[1]);
-    const auto port = static_cast<unsigned short>(std::atoi(argv[2]));
+    const auto address = net::ip::make_address("127.0.0.1");
+    const auto port = static_cast<unsigned short>(8080);
     const auto threads = 100;
 
-    net::io_context ioc{threads};
-    std::make_shared<listener>(ioc, tcp::endpoint{address, port})->run();
+    net::io_context ioc(threads);
+    std::make_shared<listener>(ioc, tcp::endpoint(address, port))->run();
 
     // Run the I/O service on the requested number of threads
     std::vector<std::thread> v;

@@ -31,6 +31,8 @@
 *.out
 *.app
 
+/boost/*
+
 /file_generator
 /file_contaminator
 /scanner

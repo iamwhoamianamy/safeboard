@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <sstream>
 
 namespace beast = boost::beast;     // from <boost/beast.hpp>
 namespace http = beast::http;       // from <boost/beast/http.hpp>
@@ -25,7 +26,7 @@ int main(int argc, char** argv)
         }
 
         auto const host = "127.0.0.1";
-        auto const port = std::atoll(argv[2]);
+        auto const port = 8080;
         auto const target = argv[1];
         int version = 11;
 
@@ -46,10 +47,17 @@ int main(int argc, char** argv)
         http::write(stream, req);
 
         beast::flat_buffer buffer;
-        http::response<http::dynamic_body> res;
+        http::response<http::empty_body> res;
         http::read(stream, buffer, res);
 
-        std::cout << res << std::endl;
+        std::cout << "====== Scan result ======" << std::endl;
+        std::cout << "Processed files: " << res["Processed"] << std::endl;
+        std::cout << "JS detects: " << res["Js"] << std::endl;
+        std::cout << "Unix detects: " << res["Unix"] << std::endl;
+        std::cout << "macOS detects: " << res["MacOS"] << std::endl;
+        std::cout << "Errors: " << res["Errors"] << std::endl;
+        std::cout << "Exection time: " << res["Time"] << std::endl;
+        std::cout << "=========================" << std::endl;
 
         beast::error_code ec;
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
