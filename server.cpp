@@ -130,7 +130,7 @@ void handle_request(
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
         res.keep_alive(req.keep_alive());
-        res.body() = "The resource '" + std::string(target) + "' was not found.";
+        res.body() = "The folder '" + std::string(target) + "' was not found.";
         res.prepare_payload();
         return res;
     };
@@ -163,8 +163,13 @@ void handle_request(
     }
 
     std::string path(req.target());
-    ScanResults scanResults;        
+    
+    if(!std::filesystem::exists(path))
+    {
+        return send(not_found(path));
+    }
 
+    ScanResults scanResults;        
     auto start = std::chrono::steady_clock::now();
 
     for (const auto& file : std::filesystem::directory_iterator(path))
@@ -172,11 +177,11 @@ void handle_request(
         SusType sus = checkForSuspicion(file.path());
         scanResults.add(sus);
     }
-    
+
     auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
 
     // Respond to GET request
-    http::response<http::empty_body> res;
+    http::response<http::empty_body> res(http::status::ok, req.version());
     res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
     res.set(boost::beast::string_view("Processed"), std::to_string(scanResults.proccessed));
     res.set(boost::beast::string_view("Js"), std::to_string(scanResults.jsFiles));
@@ -188,23 +193,19 @@ void handle_request(
     return send(std::move(res));
 }
 
-//------------------------------------------------------------------------------
-
-// Report a failure
 void fail(beast::error_code ec, char const *what)
 {
     std::cout << what << ": " << ec.message() << "\n";
 }
 
-// Handles an HTTP server connection
-class session : public std::enable_shared_from_this<session>
+class Session : public std::enable_shared_from_this<Session>
 {
     // The function object is used to send an HTTP message.
     struct send_lambda
     {
-        session &self_;
+        Session &self_;
 
-        explicit send_lambda(session &self) : self_(self) { }
+        explicit send_lambda(Session &self) : self_(self) { }
 
         template <bool isRequest, class Body, class Fields>
         void operator()(http::message<isRequest, Body, Fields> &&msg) const
@@ -220,7 +221,7 @@ class session : public std::enable_shared_from_this<session>
                 self_.stream_,
                 *sp,
                 beast::bind_front_handler(
-                    &session::on_write,
+                    &Session::on_write,
                     self_.shared_from_this(),
                     sp->need_eof()));
         }
@@ -233,47 +234,34 @@ class session : public std::enable_shared_from_this<session>
     send_lambda lambda_;
 
 public:
-    // Take ownership of the stream
-    session(tcp::socket &&socket): stream_(std::move(socket)), lambda_(*this)
+    Session(tcp::socket &&socket): stream_(std::move(socket)), lambda_(*this)
     {
     }
 
-    // Start the asynchronous operation
     void run()
     {
-        // We need to be executing within a strand to perform async operations
-        // on the I/O objects in this session. Although not strictly necessary
-        // for single-threaded contexts, this example code is written to be
-        // thread-safe by default.
         net::dispatch(stream_.get_executor(),
                       beast::bind_front_handler(
-                          &session::do_read,
+                          &Session::read,
                           shared_from_this()));
     }
 
-    void do_read()
+    void read()
     {
-        // Make the request empty before reading,
-        // otherwise the operation behavior is undefined.
         req_ = {};
-
-        // Set the timeout.
-        stream_.expires_after(std::chrono::seconds(30));
-
-        // Read a request
         http::async_read(stream_, buffer_, req_,
                          beast::bind_front_handler(
-                             &session::on_read,
+                             &Session::onRead,
                              shared_from_this()));
     }
 
-    void on_read(beast::error_code ec, std::size_t bytes_transferred)
+    void onRead(beast::error_code ec, std::size_t bytes_transferred)
     {
         boost::ignore_unused(bytes_transferred);
 
         // This means they closed the connection
         if (ec == http::error::end_of_stream)
-            return do_close();
+            return closeSession();
 
         if (ec)
             return fail(ec, "read");
@@ -293,23 +281,20 @@ public:
         {
             // This means we should close the connection, usually because
             // the response indicated the "Connection: close" semantic.
-            return do_close();
+            return closeSession();
         }
 
         // We're done with the response so delete it
         res_ = nullptr;
 
         // Read another request
-        do_read();
+        read();
     }
 
-    void do_close()
+    void closeSession()
     {
-        // Send a TCP shutdown
         beast::error_code ec;
         stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
-
-        // At this point the connection is closed gracefully
     }
 };
 
@@ -366,34 +351,32 @@ public:
     // Start accepting incoming connections
     void run()
     {
-        do_accept();
+        accept();
     }
 
 private:
-    void do_accept()
+    void accept()
     {
         acceptor_.async_accept(
             net::make_strand(ioc_),
             beast::bind_front_handler(
-                &listener::on_accept,
+                &listener::onAccept,
                 shared_from_this()));
     }
 
-    void on_accept(beast::error_code ec, tcp::socket socket)
+    void onAccept(beast::error_code ec, tcp::socket socket)
     {
         if (ec)
         {
             fail(ec, "accept");
-            return; // To avoid infinite loop
+            return;
         }
         else
         {
-            // Create the session and run it
-            std::make_shared<session>(std::move(socket))->run();
+            std::make_shared<Session>(std::move(socket))->run();
         }
 
-        // Accept another connection
-        do_accept();
+        accept();
     }
 };
 
@@ -406,7 +389,6 @@ int main(int argc, char *argv[])
     net::io_context ioc(threads);
     std::make_shared<listener>(ioc, tcp::endpoint(address, port))->run();
 
-    // Run the I/O service on the requested number of threads
     std::vector<std::thread> v;
     v.reserve(threads - 1);
     for (auto i = threads - 1; i > 0; --i)
