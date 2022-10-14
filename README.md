@@ -1,7 +1,7 @@
 # safeboard
 This is my solution to the safeboard contest problem.
 
-An algorithm goes as follows:
+The algorithm goes as follows:
 1. A client application sends a request with a path to scan for suspicious files to a server application. This is done via HTTP get request.
 2. An asynchronous server application accepts a connection and scans a desired directory for suspicious files.
 3. A response HTTP message based on work of a scanner is formed and sent back to client.
