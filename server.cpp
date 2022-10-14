@@ -100,31 +100,25 @@ SusType checkForSuspicion(const std::filesystem::path& path)
     return SusType::None;
 }
 
-// This function produces an HTTP response for the given
-// request. The type of the response object depends on the
-// contents of the request, so the interface requires the
-// caller to pass a generic lambda for receiving the response.
 template <class Body, class Allocator, class Send>
 void handle_request(
     http::request<Body, http::basic_fields<Allocator>> &&req,
     Send &&send)
 {
     // Returns a bad request response
-    auto const bad_request =
-        [&req](beast::string_view why)
+    auto const bad_request = [&req](beast::string_view message)
     {
         http::response<http::string_body> res(http::status::bad_request, req.version());
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
         res.keep_alive(req.keep_alive());
-        res.body() = std::string(why);
+        res.body() = std::string(message);
         res.prepare_payload();
         return res;
     };
 
     // Returns a not found response
-    auto const not_found =
-        [&req](beast::string_view target)
+    auto const not_found = [&req](beast::string_view target)
     {
         http::response<http::string_body> res(http::status::not_found, req.version());
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
@@ -136,19 +130,33 @@ void handle_request(
     };
 
     // Returns a server error response
-    auto const server_error =
-        [&req](beast::string_view what)
+    auto const server_error = [&req](beast::string_view message)
     {
         http::response<http::string_body> res(http::status::internal_server_error, req.version());
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
         res.keep_alive(req.keep_alive());
-        res.body() = "An error occurred: '" + std::string(what) + "'";
+        res.body() = "An error occurred: '" + std::string(message) + "'";
         res.prepare_payload();
         return res;
     };
 
-    // Make sure we can handle the method
+    // Returns a correct response
+    auto const correctResponse = [&req](const ScanResults& scanResults, double time)
+    {
+        http::response<http::empty_body> res(http::status::ok, req.version());
+        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+        res.set(boost::beast::string_view("Processed"), std::to_string(scanResults.proccessed));
+        res.set(boost::beast::string_view("Js"), std::to_string(scanResults.jsFiles));
+        res.set(boost::beast::string_view("Unix"), std::to_string(scanResults.unixFiles));
+        res.set(boost::beast::string_view("MacOS"), std::to_string(scanResults.macOSFiles));
+        res.set(boost::beast::string_view("Errors"), std::to_string(scanResults.errors));
+        res.set(boost::beast::string_view("Time"), std::to_string(time));
+        res.keep_alive(req.keep_alive());
+        return res;
+    };
+
+    // Make sure we can handle the request
     if (req.method() != http::verb::get)
     {
         return send(bad_request("Unknown HTTP-method"));
@@ -159,97 +167,61 @@ void handle_request(
         req.target()[0] != '/' ||
         req.target().find("..") != beast::string_view::npos)
     {
-        return send(bad_request("Illegal request-target"));
+        return send(bad_request("Illegal request target"));
     }
 
     std::string path(req.target());
     
+    // Make sure directory exists
     if(!std::filesystem::exists(path))
     {
         return send(not_found(path));
     }
 
+    // Now perform scanning
     ScanResults scanResults;        
     auto start = std::chrono::steady_clock::now();
 
     for (const auto& file : std::filesystem::directory_iterator(path))
     {
-        SusType sus = checkForSuspicion(file.path());
-        scanResults.add(sus);
+        scanResults.add(checkForSuspicion(file.path()));
     }
 
     auto time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
 
-    // Respond to GET request
-    http::response<http::empty_body> res(http::status::ok, req.version());
-    res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-    res.set(boost::beast::string_view("Processed"), std::to_string(scanResults.proccessed));
-    res.set(boost::beast::string_view("Js"), std::to_string(scanResults.jsFiles));
-    res.set(boost::beast::string_view("Unix"), std::to_string(scanResults.unixFiles));
-    res.set(boost::beast::string_view("MacOS"), std::to_string(scanResults.macOSFiles));
-    res.set(boost::beast::string_view("Errors"), std::to_string(scanResults.errors));
-    res.set(boost::beast::string_view("Time"), std::to_string(time));
-    res.keep_alive(req.keep_alive());
-    return send(std::move(res));
+    // Respond to request
+    return send(correctResponse(scanResults, time));
 }
 
 void fail(beast::error_code ec, char const *what)
 {
-    std::cout << what << ": " << ec.message() << "\n";
+    std::cout << "Fail on " << what << ": " << ec.message() << "\n";
 }
 
 class Session : public std::enable_shared_from_this<Session>
 {
-    // The function object is used to send an HTTP message.
-    struct send_lambda
-    {
-        Session &self_;
-
-        explicit send_lambda(Session &self) : self_(self) { }
-
-        template <bool isRequest, class Body, class Fields>
-        void operator()(http::message<isRequest, Body, Fields> &&msg) const
-        {
-            // The lifetime of the message has to extend
-            // for the duration of the async operation so
-            // we use a shared_ptr to manage it.
-            auto sp = std::make_shared<http::message<isRequest, Body, Fields>>(std::move(msg));
-            self_.res_ = sp;
-
-            // Write the response
-            http::async_write(
-                self_.stream_,
-                *sp,
-                beast::bind_front_handler(
-                    &Session::on_write,
-                    self_.shared_from_this(),
-                    sp->need_eof()));
-        }
-    };
-
-    beast::tcp_stream stream_;
-    beast::flat_buffer buffer_;
-    http::request<http::string_body> req_;
-    std::shared_ptr<void> res_;
-    send_lambda lambda_;
+private:
+    beast::tcp_stream _stream;
+    beast::flat_buffer _buffer;
+    http::request<http::string_body> _request;
+    std::shared_ptr<void> _result;
 
 public:
-    Session(tcp::socket &&socket): stream_(std::move(socket)), lambda_(*this)
-    {
-    }
+    Session(tcp::socket &&socket): _stream(std::move(socket)) { }
 
     void run()
     {
-        net::dispatch(stream_.get_executor(),
-                      beast::bind_front_handler(
-                          &Session::read,
-                          shared_from_this()));
+        net::dispatch(
+            _stream.get_executor(),
+            beast::bind_front_handler(
+                &Session::read,
+                shared_from_this()));
     }
 
     void read()
     {
-        req_ = {};
-        http::async_read(stream_, buffer_, req_,
+        _request = {};
+        http::async_read(_stream, _buffer, _request,
                          beast::bind_front_handler(
                              &Session::onRead,
                              shared_from_this()));
@@ -257,35 +229,55 @@ public:
 
     void onRead(beast::error_code ec, std::size_t bytes_transferred)
     {
+        auto sendLambda = [this]<bool isRequest, class Body, class Fields>(
+            http::message<isRequest, Body, Fields> &&msg)
+        {
+            auto sp = std::make_shared<http::message<isRequest, Body, Fields>>(std::move(msg));
+            _result = sp;
+
+            // Write the response
+            http::async_write(
+                _stream,
+                *sp,
+                beast::bind_front_handler(
+                    &Session::onWrite,
+                    shared_from_this(),
+                    sp->need_eof()));
+        };
+
         boost::ignore_unused(bytes_transferred);
 
         // This means they closed the connection
         if (ec == http::error::end_of_stream)
+        {
             return closeSession();
+        }
 
         if (ec)
+        {
             return fail(ec, "read");
+        }
 
         // Send the response
-        handle_request(std::move(req_), lambda_);
+        handle_request(std::move(_request), sendLambda);
     }
 
-    void on_write( bool close, beast::error_code ec, size_t bytes_transferred)
+    void onWrite(bool close, beast::error_code ec, size_t bytes_transferred)
     {
         boost::ignore_unused(bytes_transferred);
 
         if (ec)
+        {
             return fail(ec, "write");
+        }
 
         if (close)
         {
-            // This means we should close the connection, usually because
-            // the response indicated the "Connection: close" semantic.
             return closeSession();
         }
 
         // We're done with the response so delete it
-        res_ = nullptr;
+        _result = nullptr;
 
         // Read another request
         read();
@@ -294,57 +286,30 @@ public:
     void closeSession()
     {
         beast::error_code ec;
-        stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+        _stream.socket().shutdown(tcp::socket::shutdown_send, ec);
     }
 };
 
-//------------------------------------------------------------------------------
-
 // Accepts incoming connections and launches the sessions
-class listener : public std::enable_shared_from_this<listener>
+class Listener : public std::enable_shared_from_this<Listener>
 {
-    net::io_context &ioc_;
-    tcp::acceptor acceptor_;
+    net::io_context &_ioc;
+    tcp::acceptor _acceptor;
 
 public:
-    listener(
-        net::io_context &ioc,
-        tcp::endpoint endpoint) :
-            ioc_(ioc), acceptor_(net::make_strand(ioc))
+    Listener(net::io_context &ioc, tcp::endpoint endpoint) :
+        _ioc(ioc), _acceptor(net::make_strand(ioc))
     {
-        beast::error_code ec;
-
-        // Open the acceptor
-        acceptor_.open(endpoint.protocol(), ec);
-        if (ec)
+        try
         {
-            fail(ec, "open");
-            return;
+            _acceptor.open(endpoint.protocol());
+            _acceptor.set_option(net::socket_base::reuse_address(true));
+            _acceptor.bind(endpoint);
+            _acceptor.listen(net::socket_base::max_listen_connections);
         }
-
-        // Allow address reuse
-        acceptor_.set_option(net::socket_base::reuse_address(true), ec);
-        if (ec)
+        catch(const boost::system::system_error& e)
         {
-            fail(ec, "set_option");
-            return;
-        }
-
-        // Bind to the server address
-        acceptor_.bind(endpoint, ec);
-        if (ec)
-        {
-            fail(ec, "bind");
-            return;
-        }
-
-        // Start listening for connections
-        acceptor_.listen(net::socket_base::max_listen_connections, ec);
-
-        if (ec)
-        {
-            fail(ec, "listen");
-            return;
+            fail(e.code(), "listen");
         }
     }
 
@@ -357,10 +322,10 @@ public:
 private:
     void accept()
     {
-        acceptor_.async_accept(
-            net::make_strand(ioc_),
+        _acceptor.async_accept(
+            net::make_strand(_ioc),
             beast::bind_front_handler(
-                &listener::onAccept,
+                &Listener::onAccept,
                 shared_from_this()));
     }
 
@@ -383,11 +348,11 @@ private:
 int main(int argc, char *argv[])
 {
     const auto address = net::ip::make_address("127.0.0.1");
-    const auto port = static_cast<unsigned short>(8080);
-    const auto threads = 100;
+    const u_short port = 8080;
+    const size_t threads = 100;
 
     net::io_context ioc(threads);
-    std::make_shared<listener>(ioc, tcp::endpoint(address, port))->run();
+    std::make_shared<Listener>(ioc, tcp::endpoint(address, port))->run();
 
     std::vector<std::thread> v;
     v.reserve(threads - 1);
